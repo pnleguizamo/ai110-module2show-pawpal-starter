@@ -69,6 +69,41 @@ def build_task_rows(
     return rows
 
 
+def build_conflict_rows(conflicts: list[dict[str, str | int]]) -> list[dict[str, str | int]]:
+    """Build display rows for preferred-time conflicts."""
+    return [
+        {
+            "task_a": f"{conflict['pet_a']} | {conflict['task_a']}",
+            "time_a": conflict["time_a"],
+            "task_b": f"{conflict['pet_b']} | {conflict['task_b']}",
+            "time_b": conflict["time_b"],
+            "overlap_minutes": conflict["overlap_minutes"],
+        }
+        for conflict in conflicts
+    ]
+
+
+def render_conflict_warnings(
+    conflicts: list[dict[str, str | int]],
+    empty_message: str,
+) -> None:
+    """Render conflict warnings with both summaries and a table."""
+    if not conflicts:
+        st.success(empty_message)
+        return
+
+    plural = "s" if len(conflicts) != 1 else ""
+    st.warning(f"Detected {len(conflicts)} preferred-time conflict{plural} that may require a schedule adjustment.")
+    for conflict in conflicts:
+        st.warning(
+            f"{conflict['pet_a']}'s {conflict['task_a']} ({conflict['time_a']}) overlaps with "
+            f"{conflict['pet_b']}'s {conflict['task_b']} ({conflict['time_b']}) by "
+            f"{conflict['overlap_minutes']} minutes."
+        )
+
+    st.table(build_conflict_rows(conflicts))
+
+
 def format_task_option(pet: Pet, task: Task) -> str:
     """Build a unique label for task selection controls."""
     return (
@@ -217,12 +252,28 @@ if task_option_map:
 
     pet_filter_value = None if pet_filter_label == "All pets" else pet_filter_label
     task_rows = build_task_rows(owner, pet_filter=pet_filter_value, status_filter=status_filter)
+    scheduler = Scheduler(owner)
+    visible_pending_tasks = scheduler.filter_tasks(pet_name=pet_filter_value, status="pending")
+    todays_conflicts = scheduler.detect_conflicts(
+        pet_task_pairs=[
+            (pet, task)
+            for pet, task in visible_pending_tasks
+            if task.is_due(on_date=date.today())
+        ],
+        on_date=date.today(),
+    )
 
     if task_rows:
         st.caption("Tasks are sorted by due date and preferred time so the closest care windows surface first.")
         st.table(task_rows)
     else:
         st.info("No tasks match the current filters.")
+
+    st.caption("Conflict warnings compare today's pending tasks with preferred times so you can spot overlaps before they become a problem.")
+    render_conflict_warnings(
+        todays_conflicts,
+        empty_message="Today's pending care windows do not overlap.",
+    )
 else:
     st.info("No tasks added yet.")
 
@@ -237,22 +288,28 @@ if schedule is not None:
     scheduled_items = schedule["scheduled"]
     skipped_items = schedule["skipped"]
     conflict_items = schedule["conflicts"]
+    summary_col_1, summary_col_2, summary_col_3, summary_col_4 = st.columns(4)
+    summary_col_1.metric("Scheduled", len(scheduled_items))
+    summary_col_2.metric("Skipped", len(skipped_items))
+    summary_col_3.metric("Conflicts", len(conflict_items))
+    summary_col_4.metric("Minutes left", schedule["minutes_remaining"])
 
-    if conflict_items:
-        st.write("Detected time conflicts:")
-        st.table(conflict_items)
-    else:
-        st.success("No preferred-time conflicts detected in the scheduled tasks.")
+    render_conflict_warnings(
+        conflict_items,
+        empty_message="No preferred-time conflicts were detected in today's generated plan.",
+    )
 
     if scheduled_items:
-        st.write("Scheduled tasks:")
+        st.success("The planner selected the tasks below based on priority, recurrence, due date, and the time you have available today.")
         st.table(scheduled_items)
     else:
         st.warning("No tasks fit into today's schedule.")
 
     if skipped_items:
-        st.write("Skipped tasks:")
+        st.warning("These due tasks were left out because they would push the plan over today's available minutes.")
         st.table(skipped_items)
+    elif scheduled_items:
+        st.success("All due tasks fit into today's schedule.")
 
     st.caption(
         f"Minutes used: {schedule['minutes_used']} | "

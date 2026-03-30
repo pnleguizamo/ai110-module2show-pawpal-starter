@@ -68,7 +68,7 @@ class Task:
             return RECURRENCE_INTERVAL_DAYS[frequency]
         if frequency in NON_RECURRING_FREQUENCIES:
             return None
-        return 1
+        raise ValueError(f"Unknown frequency: {self.frequency!r}")
 
     def is_recurring(self) -> bool:
         """Return whether this task should create another future occurrence."""

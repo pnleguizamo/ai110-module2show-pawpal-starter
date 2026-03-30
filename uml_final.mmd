@@ -1,0 +1,80 @@
+classDiagram
+    class Priority {
+        <<enumeration>>
+        LOW
+        MEDIUM
+        HIGH
+    }
+
+    class Task {
+        +str title
+        +str description
+        +int duration_minutes
+        +time preferred_time
+        +str frequency
+        +date due_date
+        +bool completed
+        +date completed_on
+        +Priority priority
+        +recurrence_interval_days()
+        +is_recurring()
+        +mark_complete(completed_on)
+        +mark_incomplete()
+        +is_pending()
+        +is_due(on_date)
+        +next_due_date()
+        +status_label(on_date)
+        +preferred_time_label()
+        +preferred_time_window_label()
+        +spawn_next_occurrence(completed_on)
+    }
+
+    class Pet {
+        +str name
+        +str species
+        +int age
+        +list~Task~ tasks
+        +add_task(task)
+        +remove_task(task_title, task_due_date)
+        +get_task(task_title, task_due_date, include_completed)
+        +get_pending_tasks()
+        +get_due_tasks(on_date)
+        +complete_task(task_title, task_due_date, completed_on)
+        +total_task_minutes(pending_only, on_date)
+    }
+
+    class Owner {
+        +str name
+        +int available_minutes_per_day
+        +list~Pet~ pets
+        +dict preferences
+        +add_pet(pet)
+        +remove_pet(pet_name)
+        +get_pet(pet_name)
+        +get_all_tasks()
+        +get_all_pending_tasks()
+        +get_all_due_tasks(on_date)
+        +total_pending_minutes(on_date)
+    }
+
+    class Scheduler {
+        +Owner owner
+        +collect_all_tasks()
+        +collect_pending_tasks()
+        +collect_due_tasks(on_date)
+        +filter_tasks(pet_name, status)
+        +sort_by_time(pet_task_pairs)
+        +prioritize_tasks(on_date)
+        +mark_task_complete(pet_name, task_title, task_due_date, completed_on)
+        +detect_conflicts(pet_task_pairs, on_date)
+        +generate_daily_schedule(available_minutes, on_date)
+        +tasks_by_pet()
+        +explain_task_selection(task, on_date)
+    }
+
+    Owner "1" *-- "0..*" Pet : owns
+    Pet "1" *-- "0..*" Task : tracks
+    Task --> Priority : uses
+    Scheduler --> Owner : manages
+    Scheduler ..> Pet : reads
+    Scheduler ..> Task : filters / sorts / schedules
