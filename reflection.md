@@ -101,8 +101,11 @@ There are several main classes with some classes contained within others. The ma
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+Yes, the design changed during implementation. The original UML was more detailed and included separate classes such as OwnerProfile, DailyConstraints, ScheduleItem, and DailyPlan. During implementation, I simplified the system into four core classes: Task, Pet, Owner, and Scheduler.
+
+One important change was merging some of the planning-related classes into the Scheduler instead of keeping them as separate objects. Rather than creating a dedicated DailyPlan object with ScheduleItem entries, the scheduler now gathers tasks from all pets, prioritizes them, and returns a daily schedule as structured data. I made this change to make the first version simpler.
+
+Other than that, some classes were renamed to fit the assignment spec better. 
 
 ---
 

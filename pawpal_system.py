@@ -1,179 +1,253 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, time
-from enum import Enum
+from datetime import time
+from enum import IntEnum
 
 
-class Priority(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-
-
-class TaskCategory(str, Enum):
-    WALK = "walk"
-    FEEDING = "feeding"
-    MEDS = "meds"
-    ENRICHMENT = "enrichment"
-    GROOMING = "grooming"
-    OTHER = "other"
-
-
-class TimeBlock(str, Enum):
-    MORNING = "morning"
-    AFTERNOON = "afternoon"
-    EVENING = "evening"
-    ANYTIME = "anytime"
-
-
-@dataclass
-class OwnerProfile:
-    name: str
-    available_minutes_per_day: int
-    preferred_start_time: time
-    preferences: dict[str, str] = field(default_factory=dict)
-
-    def update_preferences(self, new_preferences: dict[str, str]) -> None:
-        pass
-
-    def set_available_time(self, minutes: int) -> None:
-        pass
-
-    def can_fit_task(self, duration_minutes: int) -> bool:
-        pass
-
-
-@dataclass
-class Pet:
-    name: str
-    species: str
-    age: int
-    special_needs: list[str] = field(default_factory=list)
-
-    def update_profile(
-        self,
-        *,
-        name: str | None = None,
-        species: str | None = None,
-        age: int | None = None,
-    ) -> None:
-        pass
-
-    def add_special_need(self, need: str) -> None:
-        pass
-
-    def get_care_context(self) -> dict[str, str | int | list[str]]:
-        pass
+class Priority(IntEnum):
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 3
 
 
 @dataclass
 class Task:
-    task_id: str
-    title: str
-    category: TaskCategory
-    duration_minutes: int
-    priority: Priority
-    preferred_time_block: TimeBlock
-    required_today: bool
-    notes: str = ""
+    """Represents one care activity for a pet."""
 
-    def is_required(self) -> bool:
-        pass
+    title: str
+    description: str
+    duration_minutes: int
+    preferred_time: time | None = None
+    frequency: str = "daily"
+    completed: bool = False
+    priority: Priority = Priority.MEDIUM
+
+    def __post_init__(self) -> None:
+        """Validate that the task duration is positive."""
+        if self.duration_minutes <= 0:
+            raise ValueError("Task duration must be greater than 0 minutes.")
+
+    def mark_complete(self) -> None:
+        """Mark the task as completed."""
+        self.completed = True
+
+    def mark_incomplete(self) -> None:
+        """Mark the task as not completed."""
+        self.completed = False
+
+    def is_pending(self) -> bool:
+        """Return whether the task still needs to be done."""
+        return not self.completed
 
     def get_priority_score(self) -> int:
-        pass
+        """Return the numeric score for the task priority."""
+        return int(self.priority)
 
-    def matches_time_block(self, time_block: TimeBlock) -> bool:
-        pass
+    def get_frequency_score(self) -> int:
+        """Return a numeric weight based on how often the task occurs."""
+        frequency_weights = {
+            "daily": 3,
+            "twice daily": 3,
+            "weekly": 2,
+            "monthly": 1,
+            "as needed": 0,
+        }
+        return frequency_weights.get(self.frequency.lower(), 1)
 
-
-@dataclass
-class DailyConstraints:
-    date: date
-    available_minutes: int
-    start_time: time
-    allowed_time_blocks: list[TimeBlock] = field(default_factory=list)
-
-    def allows(self, task: Task) -> bool:
-        pass
-
-    def remaining_minutes(self, used_minutes: int) -> int:
-        pass
-
-    def has_capacity_for(self, task: Task, used_minutes: int) -> bool:
-        pass
+    def preferred_time_label(self) -> str:
+        """Return the preferred time in a user-friendly format."""
+        if self.preferred_time is None:
+            return "Anytime"
+        return self.preferred_time.strftime("%I:%M %p").lstrip("0")
 
 
 @dataclass
-class ScheduleItem:
-    task: Task
-    start_time: time
-    end_time: time
-    selection_reason: str
+class Pet:
+    """Stores pet information and the tasks associated with that pet."""
 
-    def duration(self) -> int:
-        pass
+    name: str
+    species: str
+    age: int
+    tasks: list[Task] = field(default_factory=list)
 
-    def to_display_dict(self) -> dict[str, str | int]:
-        pass
+    def add_task(self, task: Task) -> None:
+        """Add a new task to this pet."""
+        self.tasks.append(task)
+
+    def remove_task(self, task_title: str) -> Task:
+        """Remove and return a task that matches the given title."""
+        for index, task in enumerate(self.tasks):
+            if task.title == task_title:
+                return self.tasks.pop(index)
+        raise ValueError(f"Task '{task_title}' was not found for pet '{self.name}'.")
+
+    def get_task(self, task_title: str) -> Task | None:
+        """Return the task with the given title if it exists."""
+        for task in self.tasks:
+            if task.title == task_title:
+                return task
+        return None
+
+    def get_pending_tasks(self) -> list[Task]:
+        """Return all incomplete tasks for this pet."""
+        return [task for task in self.tasks if task.is_pending()]
+
+    def complete_task(self, task_title: str) -> None:
+        """Mark a matching task as complete."""
+        task = self.get_task(task_title)
+        if task is None:
+            raise ValueError(f"Task '{task_title}' was not found for pet '{self.name}'.")
+        task.mark_complete()
+
+    def total_task_minutes(self, pending_only: bool = True) -> int:
+        """Return the total minutes of this pet's tasks."""
+        relevant_tasks = self.get_pending_tasks() if pending_only else self.tasks
+        return sum(task.duration_minutes for task in relevant_tasks)
 
 
 @dataclass
-class DailyPlan:
-    date: date
-    scheduled_items: list[ScheduleItem] = field(default_factory=list)
-    skipped_tasks: list[tuple[Task, str]] = field(default_factory=list)
-    total_minutes_used: int = 0
-    summary_reasoning: str = ""
+class Owner:
+    """Manages multiple pets and provides task-level access across them."""
 
-    def add_item(self, schedule_item: ScheduleItem) -> None:
-        pass
+    name: str
+    available_minutes_per_day: int
+    pets: list[Pet] = field(default_factory=list)
+    preferences: dict[str, str] = field(default_factory=dict)
 
-    def add_skipped_task(self, task: Task, reason: str) -> None:
-        pass
+    def __post_init__(self) -> None:
+        """Validate that the owner's available time is not negative."""
+        if self.available_minutes_per_day < 0:
+            raise ValueError("Available minutes per day cannot be negative.")
 
-    def remaining_minutes(self, total_available: int) -> int:
-        pass
+    def add_pet(self, pet: Pet) -> None:
+        """Add a pet to the owner's list of pets."""
+        self.pets.append(pet)
 
-    def to_table_rows(self) -> list[dict[str, str | int]]:
-        pass
+    def remove_pet(self, pet_name: str) -> Pet:
+        """Remove and return a pet that matches the given name."""
+        for index, pet in enumerate(self.pets):
+            if pet.name == pet_name:
+                return self.pets.pop(index)
+        raise ValueError(f"Pet '{pet_name}' was not found for owner '{self.name}'.")
+
+    def get_pet(self, pet_name: str) -> Pet | None:
+        """Return the pet with the given name if it exists."""
+        for pet in self.pets:
+            if pet.name == pet_name:
+                return pet
+        return None
+
+    def get_all_tasks(self, include_completed: bool = True) -> list[Task]:
+        """Return tasks across all pets, optionally excluding completed ones."""
+        all_tasks: list[Task] = []
+        for pet in self.pets:
+            if include_completed:
+                all_tasks.extend(pet.tasks)
+            else:
+                all_tasks.extend(pet.get_pending_tasks())
+        return all_tasks
+
+    def get_all_pending_tasks(self) -> list[Task]:
+        """Return all incomplete tasks across every pet."""
+        return self.get_all_tasks(include_completed=False)
+
+    def total_pending_minutes(self) -> int:
+        """Return the total minutes of all pending tasks."""
+        return sum(task.duration_minutes for task in self.get_all_pending_tasks())
 
 
 class Scheduler:
-    def __init__(
-        self,
-        default_sort_rules: list[str] | None = None,
-        default_start_time: time | None = None,
-    ) -> None:
-        self.default_sort_rules = default_sort_rules or [
-            "required_today",
-            "priority",
-            "duration",
-        ]
-        self.default_start_time = default_start_time
+    """Retrieves, organizes, and manages tasks across an owner's pets."""
 
-    def generate_plan(
-        self,
-        owner: OwnerProfile,
-        pet: Pet,
-        tasks: list[Task],
-        constraints: DailyConstraints,
-    ) -> DailyPlan:
-        pass
+    def __init__(self, owner: Owner) -> None:
+        """Create a scheduler for the given owner."""
+        self.owner = owner
 
-    def rank_tasks(self, tasks: list[Task], owner: OwnerProfile, pet: Pet) -> list[Task]:
-        pass
+    def collect_pending_tasks(self) -> list[tuple[Pet, Task]]:
+        """Gather pending tasks from each pet."""
+        pet_task_pairs: list[tuple[Pet, Task]] = []
+        for pet in self.owner.pets:
+            for task in pet.get_pending_tasks():
+                pet_task_pairs.append((pet, task))
+        return pet_task_pairs
 
-    def schedule_tasks(
-        self,
-        ranked_tasks: list[Task],
-        constraints: DailyConstraints,
-    ) -> list[ScheduleItem]:
-        pass
+    def prioritize_tasks(self) -> list[tuple[Pet, Task]]:
+        """Return pending tasks sorted by scheduling priority."""
+        pending_tasks = self.collect_pending_tasks()
+        return sorted(pending_tasks, key=self._task_sort_key)
 
-    def explain_choice(self, task: Task, constraints: DailyConstraints) -> str:
-        pass
+    def generate_daily_schedule(self, available_minutes: int | None = None) -> dict[str, object]:
+        """Build a schedule of tasks that fit within the available time."""
+        total_available = (
+            self.owner.available_minutes_per_day
+            if available_minutes is None
+            else available_minutes
+        )
+        if total_available < 0:
+            raise ValueError("Available minutes cannot be negative.")
 
-    def explain_skip(self, task: Task, reason: str) -> str:
-        pass
+        scheduled: list[dict[str, object]] = []
+        skipped: list[dict[str, object]] = []
+        minutes_used = 0
+
+        for pet, task in self.prioritize_tasks():
+            if minutes_used + task.duration_minutes <= total_available:
+                scheduled.append(
+                    {
+                        "pet_name": pet.name,
+                        "task_title": task.title,
+                        "description": task.description,
+                        "duration_minutes": task.duration_minutes,
+                        "preferred_time": task.preferred_time_label(),
+                        "frequency": task.frequency,
+                        "priority": task.priority.name.lower(),
+                        "reason": self.explain_task_selection(task),
+                    }
+                )
+                minutes_used += task.duration_minutes
+            else:
+                skipped.append(
+                    {
+                        "pet_name": pet.name,
+                        "task_title": task.title,
+                        "duration_minutes": task.duration_minutes,
+                        "reason": (
+                            "Skipped because it would exceed the available time for today."
+                        ),
+                    }
+                )
+
+        return {
+            "owner_name": self.owner.name,
+            "scheduled": scheduled,
+            "skipped": skipped,
+            "minutes_used": minutes_used,
+            "minutes_remaining": total_available - minutes_used,
+        }
+
+    def tasks_by_pet(self) -> dict[str, list[Task]]:
+        """Return a mapping of pet names to their task lists."""
+        return {pet.name: list(pet.tasks) for pet in self.owner.pets}
+
+    def _task_sort_key(self, pet_task_pair: tuple[Pet, Task]) -> tuple[int, int, int, str]:
+        """Return the sort key used to rank pending tasks."""
+        _, task = pet_task_pair
+        preferred_time_minutes = (
+            24 * 60
+            if task.preferred_time is None
+            else task.preferred_time.hour * 60 + task.preferred_time.minute
+        )
+        return (
+            -task.get_priority_score(),
+            -task.get_frequency_score(),
+            preferred_time_minutes,
+            task.duration_minutes,
+        )
+
+    def explain_task_selection(self, task: Task) -> str:
+        """Explain why a task was included in the daily schedule."""
+        return (
+            f"Selected because it is a {task.priority.name.lower()} priority "
+            f"{task.frequency} task that fits within today's available time."
+        )
