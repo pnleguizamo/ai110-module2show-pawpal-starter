@@ -114,12 +114,19 @@ Other than that, some classes were renamed to fit the assignment spec better.
 **a. Constraints and priorities**
 
 - What constraints does your scheduler consider (for example: time, priority, preferences)?
+
+The scheduler currently considers available time, task priority, task frequency, preferred time, and due date. Tasks are only added if they can fit in the owner's available time schedule, and after that tasks are ordered by priority, daily tasks are weighted heavier than weekly / monthly tasks, and earlier tasks are weighed heavier when other factors tie. 
+
 - How did you decide which constraints mattered most?
+Since the spec mentioned priority levels specifically, I figured that priority matters the most. Past that, obviously available time matters since a task can't be scheduled unless there's enough time to complete it. The frequency, preferred time, and due date are just tie breakers.
 
 **b. Tradeoffs**
 
 - Describe one tradeoff your scheduler makes.
+The biggest tradeoff is the greedy scheduling. Just like the initial iteration of the backend had, the current scheduler picks tasks in ranked order as it gets them and stops scheduling when the schedule runs out of time. This keeps the logic fast and simple rather than searching for the 100% most optimal schedule of tasks. 
+
 - Why is that tradeoff reasonable for this scenario?
+Instead of chasing the absolute best solution with a dynamic programming solution or something even more complex, this solution prioritizes the priority level to accomplish the highest priority tasks even at the expense of many lower priority tasks. This is an acceptable solution from a performance and complexity perspective and may even be ideal depending on how strict the given priorities are. 
 
 ---
 

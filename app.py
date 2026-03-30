@@ -1,14 +1,25 @@
-from datetime import time
+from datetime import date, time
 
 import streamlit as st
 
 from pawpal_system import Owner, Pet, Priority, Scheduler, Task
 
 
-def initialize_owner() -> None:
-    """Create the owner object once and persist it in session state."""
+FREQUENCY_OPTIONS = ["daily", "weekly", "monthly", "as needed", "once"]
+STATUS_OPTIONS = ["all", "pending", "completed"]
+
+
+def initialize_state() -> None:
+    """Create the owner object and latest schedule once per session."""
     if "owner" not in st.session_state:
         st.session_state.owner = Owner(name="Jordan", available_minutes_per_day=60)
+    if "latest_schedule" not in st.session_state:
+        st.session_state.latest_schedule = None
+
+
+def clear_schedule() -> None:
+    """Reset the saved schedule when the underlying task data changes."""
+    st.session_state.latest_schedule = None
 
 
 def priority_from_label(priority_label: str) -> Priority:
@@ -29,26 +40,50 @@ def build_pet_rows(owner: Owner) -> list[dict[str, str | int]]:
     ]
 
 
-def build_task_rows(owner: Owner) -> list[dict[str, str | int]]:
-    """Build table rows for all pet tasks."""
+def build_task_rows(
+    owner: Owner,
+    pet_filter: str | None = None,
+    status_filter: str = "all",
+) -> list[dict[str, str | int]]:
+    """Build task rows using the scheduler's filter and time sort logic."""
+    scheduler = Scheduler(owner)
     rows: list[dict[str, str | int]] = []
-    for pet in owner.pets:
-        for task in pet.tasks:
-            rows.append(
-                {
-                    "pet": pet.name,
-                    "title": task.title,
-                    "duration_minutes": task.duration_minutes,
-                    "preferred_time": task.preferred_time_label(),
-                    "priority": task.priority.name.lower(),
-                    "completed": "yes" if task.completed else "no",
-                }
-            )
+
+    filtered_tasks = scheduler.filter_tasks(pet_name=pet_filter, status=status_filter)
+    for pet, task in scheduler.sort_by_time(filtered_tasks):
+        rows.append(
+            {
+                "pet": pet.name,
+                "title": task.title,
+                "duration_minutes": task.duration_minutes,
+                "preferred_time": task.preferred_time_label(),
+                "time_window": task.preferred_time_window_label(),
+                "frequency": task.frequency,
+                "due_date": task.due_date_label(reference_date=date.today()),
+                "priority": task.priority.name.lower(),
+                "status": task.status_label(on_date=date.today()),
+                "next_due": task.next_due_label(),
+            }
+        )
+
     return rows
 
 
+def format_task_option(pet: Pet, task: Task) -> str:
+    """Build a unique label for task selection controls."""
+    return (
+        f"{pet.name} | {task.title} | due {task.due_date.isoformat()} | "
+        f"{task.status_label(on_date=date.today())}"
+    )
+
+
+def build_task_option_map(owner: Owner) -> dict[str, tuple[Pet, Task]]:
+    """Map UI task labels back to their underlying task objects."""
+    return {format_task_option(pet, task): (pet, task) for pet, task in owner.get_all_tasks()}
+
+
 st.set_page_config(page_title="PawPal+", page_icon="🐾", layout="centered")
-initialize_owner()
+initialize_state()
 
 owner: Owner = st.session_state.owner
 
@@ -56,8 +91,8 @@ st.title("🐾 PawPal+")
 
 st.markdown(
     """
-PawPal+ is a pet care planning assistant. This version connects the Streamlit UI
-to your backend classes so pets, tasks, and schedules persist during the session.
+PawPal+ is a pet care planning assistant. This version adds smarter task logic:
+time sorting, pet and status filters, recurring tasks, and basic conflict detection.
 """
 )
 
@@ -88,6 +123,7 @@ if add_pet_submitted:
         st.error("A pet with that name already exists.")
     else:
         owner.add_pet(Pet(name=pet_name.strip(), species=species, age=int(age)))
+        clear_schedule()
         st.success(f"Added pet: {pet_name.strip()}")
 
 if owner.pets:
@@ -101,14 +137,14 @@ st.divider()
 st.subheader("Add a Task")
 if owner.pets:
     with st.form("add_task_form"):
-        selected_pet_name = st.selectbox(
-            "Choose a pet",
-            [pet.name for pet in owner.pets],
-        )
+        selected_pet_name = st.selectbox("Choose a pet", [pet.name for pet in owner.pets])
         task_title = st.text_input("Task title", value="")
         task_description = st.text_input("Description", value="")
         duration = st.number_input("Duration (minutes)", min_value=1, max_value=240, value=20)
+        no_preferred_time = st.checkbox("No preferred time", value=False)
         preferred_time = st.time_input("Preferred time", value=time(8, 0))
+        frequency = st.selectbox("Recurrence", FREQUENCY_OPTIONS, index=0)
+        due_date = st.date_input("Due date", value=date.today())
         priority_label = st.selectbox("Priority", ["low", "medium", "high"], index=2)
         add_task_submitted = st.form_submit_button("Add task")
 
@@ -125,30 +161,88 @@ if owner.pets:
                         title=task_title.strip(),
                         description=task_description.strip() or task_title.strip(),
                         duration_minutes=int(duration),
-                        preferred_time=preferred_time,
+                        preferred_time=None if no_preferred_time else preferred_time,
+                        frequency=frequency,
+                        due_date=due_date,
                         priority=priority_from_label(priority_label),
                     )
                 )
+                clear_schedule()
                 st.success(f"Added task '{task_title.strip()}' for {selected_pet_name}")
-
-    task_rows = build_task_rows(owner)
-    if task_rows:
-        st.write("Current tasks:")
-        st.table(task_rows)
-    else:
-        st.info("No tasks added yet.")
 else:
     st.info("Add a pet first before creating tasks.")
+
+task_option_map = build_task_option_map(owner)
+if task_option_map:
+    st.subheader("Update Task Status")
+    with st.form("update_task_form"):
+        selected_task_label = st.selectbox("Task", list(task_option_map))
+        task_status = st.selectbox("Set status", ["pending", "completed"], index=0)
+        update_status_submitted = st.form_submit_button("Save status")
+
+    if update_status_submitted:
+        pet, task = task_option_map[selected_task_label]
+        if task_status == "completed":
+            if task.completed:
+                st.info(f"'{task.title}' is already completed.")
+            else:
+                next_task = Scheduler(owner).mark_task_complete(
+                    pet.name,
+                    task.title,
+                    task_due_date=task.due_date,
+                    completed_on=date.today(),
+                )
+                clear_schedule()
+                if next_task is None:
+                    st.success(f"Marked '{task.title}' as completed.")
+                else:
+                    st.success(
+                        f"Marked '{task.title}' as completed and created the next occurrence for "
+                        f"{next_task.due_date_label(reference_date=date.today())}."
+                    )
+        else:
+            task.mark_incomplete()
+            clear_schedule()
+            st.success(f"Marked '{task.title}' as pending.")
+
+st.divider()
+
+st.subheader("Task Explorer")
+if task_option_map:
+    filter_col, status_col = st.columns(2)
+    with filter_col:
+        pet_filter_label = st.selectbox("Filter by pet", ["All pets", *[pet.name for pet in owner.pets]])
+    with status_col:
+        status_filter = st.selectbox("Filter by status", STATUS_OPTIONS, index=1)
+
+    pet_filter_value = None if pet_filter_label == "All pets" else pet_filter_label
+    task_rows = build_task_rows(owner, pet_filter=pet_filter_value, status_filter=status_filter)
+
+    if task_rows:
+        st.caption("Tasks are sorted by due date and preferred time so the closest care windows surface first.")
+        st.table(task_rows)
+    else:
+        st.info("No tasks match the current filters.")
+else:
+    st.info("No tasks added yet.")
 
 st.divider()
 
 st.subheader("Today's Schedule")
 if st.button("Generate schedule"):
-    scheduler = Scheduler(owner)
-    schedule = scheduler.generate_daily_schedule()
+    st.session_state.latest_schedule = Scheduler(owner).generate_daily_schedule(on_date=date.today())
 
+schedule = st.session_state.latest_schedule
+if schedule is not None:
     scheduled_items = schedule["scheduled"]
     skipped_items = schedule["skipped"]
+    conflict_items = schedule["conflicts"]
+
+    if conflict_items:
+        st.write("Detected time conflicts:")
+        st.table(conflict_items)
+    else:
+        st.success("No preferred-time conflicts detected in the scheduled tasks.")
 
     if scheduled_items:
         st.write("Scheduled tasks:")

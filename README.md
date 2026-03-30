@@ -22,6 +22,17 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+PawPal+ now includes a few lightweight scheduling algorithms that make the app
+more practical for a busy pet owner:
+
+- Tasks can be sorted by due date and preferred time so the day is easier to scan.
+- Tasks can be filtered by pet and by status to focus on what still needs attention.
+- Daily and weekly recurring tasks automatically create the next occurrence when completed.
+- The scheduler detects overlapping preferred-time windows and returns warnings instead of failing.
+- The daily plan uses priority, recurrence frequency, due date, and available minutes to decide what fits.
+
 ## Getting started
 
 ### Setup
