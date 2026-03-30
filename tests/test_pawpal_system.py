@@ -148,6 +148,35 @@ def test_sort_by_time_orders_earlier_tasks_first() -> None:
     assert ordered_titles == ["Breakfast", "Walk", "Brush coat"]
 
 
+def test_sort_by_time_orders_by_due_date_before_clock_time() -> None:
+    owner = Owner(name="Jordan", available_minutes_per_day=60)
+    pet = Pet(name="Mochi", species="dog", age=3)
+
+    tomorrow_medication = Task(
+        title="Medication",
+        description="Tomorrow morning medication.",
+        duration_minutes=10,
+        preferred_time=time(7, 0),
+        due_date=date(2026, 3, 30),
+    )
+    today_feeding = Task(
+        title="Dinner feeding",
+        description="Serve dinner tonight.",
+        duration_minutes=10,
+        preferred_time=time(18, 0),
+        due_date=date(2026, 3, 29),
+    )
+
+    pet.add_task(tomorrow_medication)
+    pet.add_task(today_feeding)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner)
+    ordered_titles = [task.title for _, task in scheduler.sort_by_time(scheduler.collect_all_tasks())]
+
+    assert ordered_titles == ["Dinner feeding", "Medication"]
+
+
 def test_detect_conflicts_finds_overlapping_preferred_times() -> None:
     owner = Owner(name="Jordan", available_minutes_per_day=60)
     pet = Pet(name="Mochi", species="dog", age=3)
@@ -179,6 +208,39 @@ def test_detect_conflicts_finds_overlapping_preferred_times() -> None:
     assert conflicts[0]["task_a"] == "Morning walk"
     assert conflicts[0]["task_b"] == "Medication"
     assert conflicts[0]["overlap_minutes"] == 10
+
+
+def test_detect_conflicts_flags_tasks_with_the_exact_same_start_time() -> None:
+    owner = Owner(name="Jordan", available_minutes_per_day=60)
+    pet = Pet(name="Mochi", species="dog", age=3)
+
+    pet.add_task(
+        Task(
+            title="Breakfast",
+            description="Serve breakfast.",
+            duration_minutes=15,
+            preferred_time=time(8, 0),
+            due_date=date(2026, 3, 29),
+        )
+    )
+    pet.add_task(
+        Task(
+            title="Medication",
+            description="Give medication with breakfast.",
+            duration_minutes=5,
+            preferred_time=time(8, 0),
+            due_date=date(2026, 3, 29),
+        )
+    )
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner)
+    conflicts = scheduler.detect_conflicts(on_date=date(2026, 3, 29))
+
+    assert len(conflicts) == 1
+    assert conflicts[0]["task_a"] == "Breakfast"
+    assert conflicts[0]["task_b"] == "Medication"
+    assert conflicts[0]["overlap_minutes"] == 5
 
 
 def test_generate_daily_schedule_only_uses_tasks_due_today() -> None:
@@ -223,3 +285,44 @@ def test_generate_daily_schedule_only_uses_tasks_due_today() -> None:
 
     assert scheduled_titles == ["Morning walk", "Evening feeding"]
     assert schedule["minutes_used"] == 30
+
+
+def test_generate_daily_schedule_handles_pet_with_no_tasks() -> None:
+    owner = Owner(name="Jordan", available_minutes_per_day=40)
+    pet = Pet(name="Mochi", species="dog", age=3)
+    owner.add_pet(pet)
+
+    scheduler = Scheduler(owner)
+    schedule = scheduler.generate_daily_schedule(on_date=date(2026, 3, 29))
+
+    assert schedule["scheduled"] == []
+    assert schedule["skipped"] == []
+    assert schedule["conflicts"] == []
+    assert schedule["minutes_used"] == 0
+    assert schedule["minutes_remaining"] == 40
+
+
+def test_complete_task_reuses_existing_future_occurrence_instead_of_duplicating() -> None:
+    pet = Pet(name="Mochi", species="dog", age=3)
+    existing_next_task = Task(
+        title="Medication",
+        description="Tomorrow's medication.",
+        duration_minutes=10,
+        frequency="daily",
+        due_date=date(2026, 3, 30),
+    )
+    pet.add_task(
+        Task(
+            title="Medication",
+            description="Today's medication.",
+            duration_minutes=10,
+            frequency="daily",
+            due_date=date(2026, 3, 29),
+        )
+    )
+    pet.add_task(existing_next_task)
+
+    next_task = pet.complete_task("Medication", task_due_date=date(2026, 3, 29), completed_on=date(2026, 3, 29))
+
+    assert next_task == existing_next_task
+    assert len(pet.tasks) == 2
